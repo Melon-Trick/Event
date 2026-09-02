@@ -1,0 +1,92 @@
+plugins {
+	id 'java-library'
+	id 'jacoco'
+	id 'maven-publish'
+	id 'com.diffplug.spotless' version '8.10.0'
+	id 'name.remal.sonarlint' version '7.1.6'
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+	withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+	options.release = 21
+	options.compilerArgs.addAll(['-Xlint:all', '-Werror'])
+}
+
+dependencies {
+	testImplementation platform('org.junit:junit-bom:6.0.1')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(Test).configureEach {
+	useJUnitPlatform()
+	testLogging {
+		events 'failed', 'skipped'
+		exceptionFormat = 'full'
+	}
+}
+
+spotless {
+	lineEndings = com.diffplug.spotless.LineEnding.UNIX
+	java {
+		palantirJavaFormat('2.97.0').formatJavadoc(true)
+		formatAnnotations()
+		removeUnusedImports()
+		trimTrailingWhitespace()
+		endWithNewline()
+	}
+	groovyGradle {
+		greclipse()
+		trimTrailingWhitespace()
+		endWithNewline()
+	}
+	format 'misc', {
+		target '*.md', '*.properties', '.gitignore'
+		trimTrailingWhitespace()
+		endWithNewline()
+	}
+}
+
+jacoco {
+	toolVersion = '0.8.14'
+}
+
+jacocoTestReport {
+	dependsOn test
+	reports {
+		xml.required = true
+		html.required = true
+	}
+}
+
+check {
+	dependsOn spotlessCheck
+	finalizedBy jacocoTestReport
+}
+
+tasks.register('quality') {
+	group = 'verification'
+	description = 'Runs formatting checks, tests, and SonarLint.'
+	dependsOn check
+	dependsOn tasks.matching { task ->
+		task.name.toLowerCase(Locale.ROOT).startsWith('sonarlint')
+		&& !task.name.toLowerCase(Locale.ROOT).contains('properties')
+		&& !task.name.toLowerCase(Locale.ROOT).contains('rules')
+	}
+}
+
+publishing {
+	publications {
+		library(MavenPublication) {
+			from components.java
+			artifactId = 'event-framework'
+		}
+	}
+}
