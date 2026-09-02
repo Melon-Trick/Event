@@ -19,7 +19,7 @@ public final class DefaultSubscriptionBuilder<E extends Event> implements EventS
     private final Class<E> eventType;
     private int priority = EventPriority.NORMAL.value();
     private Object owner;
-    private EventFilter<E> filter = (event, context) -> true;
+    private EventFilter<E> filter = (_, _) -> true;
     private boolean receivesCancelledEvents;
     private boolean exactTypeOnly;
     private Set<EventPhase> phases = Set.of(EventPhase.values());
@@ -85,7 +85,7 @@ public final class DefaultSubscriptionBuilder<E extends Event> implements EventS
     @Override
     public Subscription subscribe(EventHandler<? super E> handler) {
         EventHandler<? super E> checkedHandler = Objects.requireNonNull(handler, "handler");
-        return subscribe((event, context) -> checkedHandler.handle(event));
+        return subscribe((event, _) -> checkedHandler.handle(event));
     }
 
     @Override

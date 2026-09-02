@@ -25,7 +25,7 @@ public interface EventExceptionHandler {
      * @return stateless ignoring handler
      */
     static EventExceptionHandler ignoring() {
-        return failure -> {};
+        return _ -> {};
     }
 
     /**

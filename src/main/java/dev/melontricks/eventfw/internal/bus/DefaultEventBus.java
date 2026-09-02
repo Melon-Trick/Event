@@ -104,14 +104,14 @@ public final class DefaultEventBus implements EventBus {
         requireOpen();
         DefaultSubscription<E> subscription =
                 new DefaultSubscription<>(this, nextSubscriptionId.incrementAndGet(), configuration);
-        subscriptions.compute(configuration.eventType(), (eventType, current) -> {
+        subscriptions.compute(configuration.eventType(), (_, current) -> {
             CopyOnWriteArrayList<DefaultSubscription<?>> updated =
                     current == null ? new CopyOnWriteArrayList<>() : current;
             updated.add(subscription);
             return updated;
         });
         if (configuration.owner() != null) {
-            subscriptionsByOwner.compute(new IdentityKey(configuration.owner()), (owner, current) -> {
+            subscriptionsByOwner.compute(new IdentityKey(configuration.owner()), (_, current) -> {
                 CopyOnWriteArrayList<DefaultSubscription<?>> updated =
                         current == null ? new CopyOnWriteArrayList<>() : current;
                 updated.add(subscription);
@@ -200,14 +200,14 @@ public final class DefaultEventBus implements EventBus {
     }
 
     public void remove(DefaultSubscription<?> subscription) {
-        subscriptions.computeIfPresent(subscription.eventType(), (eventType, current) -> {
+        subscriptions.computeIfPresent(subscription.eventType(), (_, current) -> {
             current.remove(subscription);
             return current.isEmpty() ? null : current;
         });
         Object owner = subscription.rawOwner();
         if (owner != null) {
             IdentityKey ownerKey = new IdentityKey(owner);
-            subscriptionsByOwner.computeIfPresent(ownerKey, (key, current) -> {
+            subscriptionsByOwner.computeIfPresent(ownerKey, (_, current) -> {
                 current.remove(subscription);
                 return current.isEmpty() ? null : current;
             });
