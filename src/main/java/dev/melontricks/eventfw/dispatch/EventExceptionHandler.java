@@ -11,9 +11,7 @@ public interface EventExceptionHandler {
     static EventExceptionHandler logging(System.Logger logger) {
         return failure -> logger.log(
                 System.Logger.Level.ERROR,
-                "Event listener {0} failed during {1}",
-                failure.subscription().id(),
-                failure.stage(),
+                "Event listener " + failure.subscription().id() + " failed during " + failure.stage(),
                 failure.cause());
     }
 }
