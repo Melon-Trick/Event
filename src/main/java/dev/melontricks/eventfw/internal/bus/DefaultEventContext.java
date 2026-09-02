@@ -1,0 +1,60 @@
+package dev.melontricks.eventfw.internal.bus;
+
+import dev.melontricks.eventfw.bus.EventPublisher;
+import dev.melontricks.eventfw.dispatch.EventContext;
+import dev.melontricks.eventfw.event.Event;
+import java.time.Instant;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+final class DefaultEventContext<E extends Event> implements EventContext<E> {
+    private final E event;
+    private final EventPublisher publisher;
+    private final long sequence;
+    private final Instant publishedAt;
+    private final int nestingDepth;
+    private final AtomicBoolean propagationStopped = new AtomicBoolean();
+
+    DefaultEventContext(E event, EventPublisher publisher, long sequence, Instant publishedAt, int nestingDepth) {
+        this.event = Objects.requireNonNull(event, "event");
+        this.publisher = Objects.requireNonNull(publisher, "publisher");
+        this.sequence = sequence;
+        this.publishedAt = Objects.requireNonNull(publishedAt, "publishedAt");
+        this.nestingDepth = nestingDepth;
+    }
+
+    @Override
+    public E event() {
+        return event;
+    }
+
+    @Override
+    public EventPublisher publisher() {
+        return publisher;
+    }
+
+    @Override
+    public long sequence() {
+        return sequence;
+    }
+
+    @Override
+    public Instant publishedAt() {
+        return publishedAt;
+    }
+
+    @Override
+    public int nestingDepth() {
+        return nestingDepth;
+    }
+
+    @Override
+    public boolean propagationStopped() {
+        return propagationStopped.get();
+    }
+
+    @Override
+    public void stopPropagation() {
+        propagationStopped.set(true);
+    }
+}
