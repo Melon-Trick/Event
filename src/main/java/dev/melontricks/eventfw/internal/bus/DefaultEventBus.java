@@ -6,6 +6,7 @@ import dev.melontricks.eventfw.bus.TypeMatching;
 import dev.melontricks.eventfw.dispatch.DispatchResult;
 import dev.melontricks.eventfw.dispatch.EventDispatchException;
 import dev.melontricks.eventfw.dispatch.EventExceptionHandler;
+import dev.melontricks.eventfw.dispatch.EventPhase;
 import dev.melontricks.eventfw.dispatch.FailurePolicy;
 import dev.melontricks.eventfw.dispatch.FailureStage;
 import dev.melontricks.eventfw.dispatch.ListenerFailure;
@@ -18,7 +19,6 @@ import dev.melontricks.eventfw.internal.listener.DefaultSubscriptionBuilder;
 import dev.melontricks.eventfw.internal.listener.IdentityKey;
 import dev.melontricks.eventfw.internal.listener.SubscriptionConfiguration;
 import dev.melontricks.eventfw.listener.ContextualEventHandler;
-import dev.melontricks.eventfw.listener.EventFilter;
 import dev.melontricks.eventfw.listener.EventHandler;
 import dev.melontricks.eventfw.listener.EventSubscriptionBuilder;
 import dev.melontricks.eventfw.listener.Registration;
@@ -100,27 +100,23 @@ public final class DefaultEventBus implements EventBus {
         return new DefaultSubscriptionBuilder<>(this, Objects.requireNonNull(eventType, "eventType"));
     }
 
-    public <E extends Event> Subscription add(
-            Class<E> eventType,
-            int priority,
-            Object owner,
-            EventFilter<E> filter,
-            boolean receivesCancelledEvents,
-            boolean exactTypeOnly,
-            ContextualEventHandler<E> handler) {
+    public <E extends Event> Subscription add(SubscriptionConfiguration<E> configuration) {
         requireOpen();
-        DefaultSubscription<E> subscription = new DefaultSubscription<>(
-                this,
-                nextSubscriptionId.incrementAndGet(),
-                new SubscriptionConfiguration<>(
-                        eventType, priority, owner, filter, receivesCancelledEvents, exactTypeOnly, handler));
-        subscriptions
-                .computeIfAbsent(eventType, ignored -> new CopyOnWriteArrayList<>())
-                .add(subscription);
-        if (owner != null) {
-            subscriptionsByOwner
-                    .computeIfAbsent(new IdentityKey(owner), ignored -> new CopyOnWriteArrayList<>())
-                    .add(subscription);
+        DefaultSubscription<E> subscription =
+                new DefaultSubscription<>(this, nextSubscriptionId.incrementAndGet(), configuration);
+        subscriptions.compute(configuration.eventType(), (eventType, current) -> {
+            CopyOnWriteArrayList<DefaultSubscription<?>> updated =
+                    current == null ? new CopyOnWriteArrayList<>() : current;
+            updated.add(subscription);
+            return updated;
+        });
+        if (configuration.owner() != null) {
+            subscriptionsByOwner.compute(new IdentityKey(configuration.owner()), (owner, current) -> {
+                CopyOnWriteArrayList<DefaultSubscription<?>> updated =
+                        current == null ? new CopyOnWriteArrayList<>() : current;
+                updated.add(subscription);
+                return updated;
+            });
         }
         activeSubscriptions.incrementAndGet();
         invalidateCandidates();
@@ -160,6 +156,12 @@ public final class DefaultEventBus implements EventBus {
         if (method.exactTypeOnly()) {
             builder.exactTypeOnly();
         }
+        if (!method.phases().isEmpty()) {
+            builder.phases(method.phases());
+        }
+        if (method.singleUse()) {
+            builder.once();
+        }
         return builder.subscribe(
                 (ContextualEventHandler<Event>) (event, context) -> method.invoke(listener, event, context));
     }
@@ -198,23 +200,17 @@ public final class DefaultEventBus implements EventBus {
     }
 
     public void remove(DefaultSubscription<?> subscription) {
-        CopyOnWriteArrayList<DefaultSubscription<?>> typedSubscriptions = subscriptions.get(subscription.eventType());
-        if (typedSubscriptions != null) {
-            typedSubscriptions.remove(subscription);
-            if (typedSubscriptions.isEmpty()) {
-                subscriptions.remove(subscription.eventType(), typedSubscriptions);
-            }
-        }
+        subscriptions.computeIfPresent(subscription.eventType(), (eventType, current) -> {
+            current.remove(subscription);
+            return current.isEmpty() ? null : current;
+        });
         Object owner = subscription.rawOwner();
         if (owner != null) {
             IdentityKey ownerKey = new IdentityKey(owner);
-            CopyOnWriteArrayList<DefaultSubscription<?>> owned = subscriptionsByOwner.get(ownerKey);
-            if (owned != null) {
-                owned.remove(subscription);
-                if (owned.isEmpty()) {
-                    subscriptionsByOwner.remove(ownerKey, owned);
-                }
-            }
+            subscriptionsByOwner.computeIfPresent(ownerKey, (key, current) -> {
+                current.remove(subscription);
+                return current.isEmpty() ? null : current;
+            });
         }
         activeSubscriptions.decrementAndGet();
         invalidateCandidates();
@@ -222,15 +218,21 @@ public final class DefaultEventBus implements EventBus {
 
     @Override
     public <E extends Event> DispatchResult<E> publish(E event) {
+        return publish(event, EventPhase.DEFAULT);
+    }
+
+    @Override
+    public <E extends Event> DispatchResult<E> publish(E event, EventPhase phase) {
         requireOpen();
         E checkedEvent = Objects.requireNonNull(event, "event");
+        EventPhase checkedPhase = Objects.requireNonNull(phase, "phase");
         int parentDepth = nestingDepth.get();
         if (parentDepth >= maximumNestingDepth) {
             throw new IllegalStateException("maximum nested event dispatch depth exceeded");
         }
         nestingDepth.set(parentDepth + 1);
         try {
-            return dispatch(checkedEvent, parentDepth);
+            return dispatch(checkedEvent, checkedPhase, parentDepth);
         } finally {
             if (parentDepth == 0) {
                 nestingDepth.remove();
@@ -240,11 +242,11 @@ public final class DefaultEventBus implements EventBus {
         }
     }
 
-    private <E extends Event> DispatchResult<E> dispatch(E event, int depth) {
+    private <E extends Event> DispatchResult<E> dispatch(E event, EventPhase phase, int depth) {
         long startedNanos = System.nanoTime();
         long sequence = nextDispatchSequence.incrementAndGet();
         publishedEvents.increment();
-        DefaultEventContext<E> context = new DefaultEventContext<>(event, this, sequence, Instant.now(), depth);
+        DefaultEventContext<E> context = new DefaultEventContext<>(event, this, sequence, Instant.now(), phase, depth);
         List<Candidate> candidates = candidatesFor(eventType(event));
         DispatchAccumulator accumulator = new DispatchAccumulator();
         for (int index = 0; index < candidates.size(); index++) {
@@ -257,6 +259,7 @@ public final class DefaultEventBus implements EventBus {
         return new DispatchResult<>(
                 event,
                 sequence,
+                phase,
                 candidates.size(),
                 accumulator.invoked(),
                 accumulator.skipped(),
@@ -273,7 +276,10 @@ public final class DefaultEventBus implements EventBus {
             DefaultEventContext<E> context,
             DispatchAccumulator accumulator) {
         DefaultSubscription<E> subscription = (DefaultSubscription<E>) rawSubscription;
-        if (!subscription.active() || isCancelled(event) && !subscription.receivesCancelledEvents()) {
+        if (!subscription.active()
+                || subscription.paused()
+                || !subscription.phases().contains(context.phase())
+                || isCancelled(event) && !subscription.receivesCancelledEvents()) {
             accumulator.skip(1);
             return;
         }
@@ -285,6 +291,10 @@ public final class DefaultEventBus implements EventBus {
         } catch (RuntimeException exception) {
             accumulator.skip(1);
             handleFailure(event, subscription, FailureStage.FILTER, exception, accumulator);
+            return;
+        }
+        if (!subscription.acquireForInvocation()) {
+            accumulator.skip(1);
             return;
         }
         accumulator.invoke();
@@ -311,9 +321,15 @@ public final class DefaultEventBus implements EventBus {
 
     @Override
     public <E extends Event> CompletionStage<DispatchResult<E>> publishAsync(E event) {
+        return publishAsync(event, EventPhase.DEFAULT);
+    }
+
+    @Override
+    public <E extends Event> CompletionStage<DispatchResult<E>> publishAsync(E event, EventPhase phase) {
         E checkedEvent = Objects.requireNonNull(event, "event");
+        EventPhase checkedPhase = Objects.requireNonNull(phase, "phase");
         requireOpen();
-        return CompletableFuture.supplyAsync(() -> publish(checkedEvent), asyncExecutor);
+        return CompletableFuture.supplyAsync(() -> publish(checkedEvent, checkedPhase), asyncExecutor);
     }
 
     @Override

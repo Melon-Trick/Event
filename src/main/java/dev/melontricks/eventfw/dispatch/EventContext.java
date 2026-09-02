@@ -13,6 +13,8 @@ public interface EventContext<E extends Event> {
 
     Instant publishedAt();
 
+    EventPhase phase();
+
     int nestingDepth();
 
     boolean propagationStopped();

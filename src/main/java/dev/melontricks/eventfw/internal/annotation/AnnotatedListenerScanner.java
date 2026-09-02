@@ -3,6 +3,7 @@ package dev.melontricks.eventfw.internal.annotation;
 import dev.melontricks.eventfw.annotation.InvalidListenerException;
 import dev.melontricks.eventfw.annotation.Subscribe;
 import dev.melontricks.eventfw.dispatch.EventContext;
+import dev.melontricks.eventfw.dispatch.EventPhase;
 import dev.melontricks.eventfw.event.Event;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -100,6 +101,8 @@ public final class AnnotatedListenerScanner {
                 annotation.priority(),
                 annotation.receiveCancelledEvents(),
                 annotation.exactTypeOnly(),
+                Set.of(annotation.phases()),
+                annotation.once(),
                 receivesContext,
                 method);
     }
@@ -118,6 +121,8 @@ public final class AnnotatedListenerScanner {
             int priority,
             boolean receivesCancelledEvents,
             boolean exactTypeOnly,
+            Set<EventPhase> phases,
+            boolean singleUse,
             boolean receivesContext,
             Method method) {
         public void invoke(Object listener, Event event, EventContext<Event> context) {

@@ -1,5 +1,6 @@
 package dev.melontricks.eventfw.annotation;
 
+import dev.melontricks.eventfw.dispatch.EventPhase;
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -15,4 +16,8 @@ public @interface Subscribe {
     boolean receiveCancelledEvents() default false;
 
     boolean exactTypeOnly() default false;
+
+    EventPhase[] phases() default {};
+
+    boolean once() default false;
 }

@@ -8,6 +8,7 @@ import java.util.Objects;
 public record DispatchResult<E extends Event>(
         E event,
         long sequence,
+        EventPhase phase,
         int matchedListeners,
         int invokedListeners,
         int skippedListeners,
@@ -17,6 +18,7 @@ public record DispatchResult<E extends Event>(
         Duration duration) {
     public DispatchResult {
         Objects.requireNonNull(event, "event");
+        Objects.requireNonNull(phase, "phase");
         failures = List.copyOf(Objects.requireNonNull(failures, "failures"));
         Objects.requireNonNull(duration, "duration");
     }

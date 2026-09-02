@@ -1,6 +1,7 @@
 package dev.melontricks.eventfw.internal.listener;
 
 import dev.melontricks.eventfw.dispatch.EventContext;
+import dev.melontricks.eventfw.dispatch.EventPhase;
 import dev.melontricks.eventfw.event.Event;
 import dev.melontricks.eventfw.internal.bus.DefaultEventBus;
 import dev.melontricks.eventfw.listener.ContextualEventHandler;
@@ -8,9 +9,14 @@ import dev.melontricks.eventfw.listener.EventFilter;
 import dev.melontricks.eventfw.listener.Subscription;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class DefaultSubscription<E extends Event> implements Subscription {
+    private static final int ENABLED = 0;
+    private static final int PAUSED = 1;
+    private static final int CLOSED = 2;
+
     private final DefaultEventBus bus;
     private final long id;
     private final Class<E> eventType;
@@ -19,8 +25,10 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
     private final EventFilter<E> filter;
     private final boolean receivesCancelledEvents;
     private final boolean exactTypeOnly;
+    private final Set<EventPhase> phases;
+    private final boolean singleUse;
     private final ContextualEventHandler<E> handler;
-    private final AtomicBoolean active = new AtomicBoolean(true);
+    private final AtomicInteger state = new AtomicInteger(ENABLED);
 
     public DefaultSubscription(DefaultEventBus bus, long id, SubscriptionConfiguration<E> configuration) {
         this.bus = Objects.requireNonNull(bus, "bus");
@@ -32,6 +40,8 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
         filter = checkedConfiguration.filter();
         receivesCancelledEvents = checkedConfiguration.receivesCancelledEvents();
         exactTypeOnly = checkedConfiguration.exactTypeOnly();
+        phases = checkedConfiguration.phases();
+        singleUse = checkedConfiguration.singleUse();
         handler = checkedConfiguration.handler();
     }
 
@@ -61,6 +71,31 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
     }
 
     @Override
+    public Set<EventPhase> phases() {
+        return phases;
+    }
+
+    @Override
+    public boolean singleUse() {
+        return singleUse;
+    }
+
+    @Override
+    public boolean paused() {
+        return state.get() == PAUSED;
+    }
+
+    @Override
+    public void pause() {
+        state.compareAndSet(ENABLED, PAUSED);
+    }
+
+    @Override
+    public void resume() {
+        state.compareAndSet(PAUSED, ENABLED);
+    }
+
+    @Override
     public Optional<Object> owner() {
         return Optional.ofNullable(owner);
     }
@@ -71,14 +106,25 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
 
     @Override
     public boolean active() {
-        return active.get();
+        return state.get() != CLOSED;
     }
 
     @Override
     public void close() {
-        if (active.compareAndSet(true, false)) {
+        if (state.getAndSet(CLOSED) != CLOSED) {
             bus.remove(this);
         }
+    }
+
+    public boolean acquireForInvocation() {
+        if (!singleUse) {
+            return state.get() == ENABLED;
+        }
+        if (state.compareAndSet(ENABLED, CLOSED)) {
+            bus.remove(this);
+            return true;
+        }
+        return false;
     }
 
     public boolean test(E event, EventContext<E> context) {
@@ -87,9 +133,5 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
 
     public void invoke(E event, EventContext<E> context) {
         handler.handle(event, context);
-    }
-
-    public void deactivate() {
-        active.set(false);
     }
 }
