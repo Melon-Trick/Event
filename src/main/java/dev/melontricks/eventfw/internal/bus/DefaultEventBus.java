@@ -205,7 +205,9 @@ public final class DefaultEventBus implements EventBus {
         CopyOnWriteArrayList<DefaultSubscription<?>> typedSubscriptions = subscriptions.get(subscription.eventType());
         if (typedSubscriptions != null) {
             typedSubscriptions.remove(subscription);
-            subscriptions.remove(subscription.eventType(), typedSubscriptions);
+            if (typedSubscriptions.isEmpty()) {
+                subscriptions.remove(subscription.eventType(), typedSubscriptions);
+            }
         }
         Object owner = subscription.rawOwner();
         if (owner != null) {
@@ -213,7 +215,9 @@ public final class DefaultEventBus implements EventBus {
             CopyOnWriteArrayList<DefaultSubscription<?>> owned = subscriptionsByOwner.get(ownerKey);
             if (owned != null) {
                 owned.remove(subscription);
-                subscriptionsByOwner.remove(ownerKey, owned);
+                if (owned.isEmpty()) {
+                    subscriptionsByOwner.remove(ownerKey, owned);
+                }
             }
         }
         activeSubscriptions.decrementAndGet();
@@ -345,18 +349,18 @@ public final class DefaultEventBus implements EventBus {
     }
 
     private List<Candidate> candidatesFor(Class<? extends Event> concreteType) {
-        long revision = subscriptionRevision.get();
-        ResolvedCandidates cached = candidateCache.get(concreteType);
-        if (cached != null && cached.revision() == revision) {
-            return cached.candidates();
+        while (true) {
+            long revision = subscriptionRevision.get();
+            ResolvedCandidates cached = candidateCache.get(concreteType);
+            if (cached != null && cached.revision() == revision) {
+                return cached.candidates();
+            }
+            List<Candidate> resolved = resolveCandidates(concreteType);
+            if (subscriptionRevision.get() == revision) {
+                candidateCache.put(concreteType, new ResolvedCandidates(revision, resolved));
+                return resolved;
+            }
         }
-        List<Candidate> resolved = resolveCandidates(concreteType);
-        long resolvedRevision = subscriptionRevision.get();
-        if (resolvedRevision != revision) {
-            return candidatesFor(concreteType);
-        }
-        candidateCache.put(concreteType, new ResolvedCandidates(revision, resolved));
-        return resolved;
     }
 
     private List<Candidate> resolveCandidates(Class<? extends Event> concreteType) {
