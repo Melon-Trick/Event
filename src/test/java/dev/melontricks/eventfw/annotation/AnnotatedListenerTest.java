@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import dev.melontricks.eventfw.bus.EventBus;
 import dev.melontricks.eventfw.bus.EventBuses;
 import dev.melontricks.eventfw.dispatch.EventContext;
+import dev.melontricks.eventfw.dispatch.EventPhase;
 import dev.melontricks.eventfw.event.Event;
 import dev.melontricks.eventfw.listener.Registration;
 import java.util.ArrayList;
@@ -51,6 +52,30 @@ final class AnnotatedListenerTest {
 
         assertEquals(0, registration.subscriptions().size());
         assertEquals(List.of(), listener.calls);
+    }
+
+    @Test
+    void annotationCanRestrictDeliveryPhases() {
+        EventBus bus = EventBuses.create();
+        PhasedListener listener = new PhasedListener();
+        bus.register(listener);
+
+        bus.publish(new TestEvent("pre"), EventPhase.PRE);
+        bus.publish(new TestEvent("post"), EventPhase.POST);
+
+        assertEquals(List.of("post"), listener.calls);
+    }
+
+    @Test
+    void annotationSupportsSingleUseHandlers() {
+        EventBus bus = EventBuses.create();
+        SingleUseListener listener = new SingleUseListener();
+        bus.register(listener);
+
+        bus.publish(new TestEvent("first"));
+        bus.publish(new TestEvent("second"));
+
+        assertEquals(List.of("first"), listener.calls);
     }
 
     @Test
@@ -112,6 +137,24 @@ final class AnnotatedListenerTest {
         @Subscribe(exactTypeOnly = true)
         private void handle(ParentEvent event) {
             calls++;
+        }
+    }
+
+    private static final class PhasedListener {
+        private final List<String> calls = new ArrayList<>();
+
+        @Subscribe(phases = EventPhase.POST)
+        private void handle(TestEvent event) {
+            calls.add(event.value());
+        }
+    }
+
+    private static final class SingleUseListener {
+        private final List<String> calls = new ArrayList<>();
+
+        @Subscribe(once = true)
+        private void handle(TestEvent event) {
+            calls.add(event.value());
         }
     }
 

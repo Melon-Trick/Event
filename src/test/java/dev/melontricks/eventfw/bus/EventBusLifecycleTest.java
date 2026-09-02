@@ -91,6 +91,48 @@ final class EventBusLifecycleTest {
     }
 
     @Test
+    void subscriptionsCanBePausedResumedAndClosed() {
+        EventBus bus = EventBuses.create();
+        List<Integer> calls = new ArrayList<>();
+        Subscription subscription = bus.subscribe(TestEvent.class, event -> calls.add(event.value()));
+
+        subscription.pause();
+        bus.publish(new TestEvent(1));
+        subscription.resume();
+        bus.publish(new TestEvent(2));
+        subscription.close();
+        subscription.resume();
+        bus.publish(new TestEvent(3));
+
+        assertEquals(List.of(2), calls);
+        assertFalse(subscription.active());
+        assertFalse(subscription.paused());
+    }
+
+    @Test
+    void singleUseSubscriptionsAreAtomicAcrossPublishers() throws Exception {
+        EventBus bus = EventBuses.create();
+        LongAdder calls = new LongAdder();
+        Subscription subscription = bus.on(TestEvent.class).once().subscribe(event -> calls.increment());
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(8)) {
+            List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
+            for (int index = 0; index < 100; index++) {
+                int value = index;
+                futures.add(executor.submit(() -> bus.publish(new TestEvent(value))));
+            }
+            for (java.util.concurrent.Future<?> future : futures) {
+                future.get();
+            }
+        }
+
+        assertEquals(1, calls.sum());
+        assertFalse(subscription.active());
+        assertTrue(subscription.singleUse());
+        assertEquals(0, bus.subscriptionCount());
+    }
+
+    @Test
     void supportsConcurrentPublication() throws Exception {
         EventBus bus = EventBuses.create();
         LongAdder calls = new LongAdder();

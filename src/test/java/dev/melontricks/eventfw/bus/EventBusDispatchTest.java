@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.melontricks.eventfw.dispatch.DispatchResult;
+import dev.melontricks.eventfw.dispatch.EventPhase;
 import dev.melontricks.eventfw.event.AbstractCancellableEvent;
 import dev.melontricks.eventfw.event.Event;
 import dev.melontricks.eventfw.listener.EventPriority;
@@ -111,6 +112,26 @@ final class EventBusDispatchTest {
         assertEquals(1, rejected.skippedListeners());
         assertFalse(rejected.delivered());
         assertEquals(1, accepted.invokedListeners());
+    }
+
+    @Test
+    void phasesRestrictDeliveryAndReachTheContext() {
+        EventBus bus = EventBuses.create();
+        List<String> calls = new ArrayList<>();
+        bus.on(ChildEvent.class).phase(EventPhase.PRE).subscribe(event -> calls.add("pre"));
+        bus.on(ChildEvent.class)
+                .phase(EventPhase.POST)
+                .subscribe((event, context) -> calls.add(context.phase().name()));
+        bus.subscribe(ChildEvent.class, event -> calls.add("all"));
+
+        DispatchResult<ChildEvent> pre = bus.publish(new ChildEvent("value"), EventPhase.PRE);
+        DispatchResult<ChildEvent> post = bus.publish(new ChildEvent("value"), EventPhase.POST);
+
+        assertEquals(List.of("pre", "all", "POST", "all"), calls);
+        assertEquals(EventPhase.PRE, pre.phase());
+        assertEquals(EventPhase.POST, post.phase());
+        assertEquals(1, pre.skippedListeners());
+        assertEquals(1, post.skippedListeners());
     }
 
     @Test
