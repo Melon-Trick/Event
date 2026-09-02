@@ -11,12 +11,25 @@ java {
 		languageVersion = JavaLanguageVersion.of(21)
 	}
 	withSourcesJar()
+	withJavadocJar()
 }
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
 	options.release = 21
 	options.compilerArgs.addAll(['-Xlint:all', '-Werror'])
+}
+
+tasks.withType(Javadoc).configureEach {
+	dependsOn classes
+	source = sourceSets.main.allJava.matching {
+		exclude 'module-info.java'
+		exclude '**/internal/**'
+	}
+	classpath = files(sourceSets.main.output.classesDirs) + sourceSets.main.compileClasspath
+	modularity.inferModulePath = false
+	options.encoding = 'UTF-8'
+	options.addBooleanOption('Xdoclint:all', true)
 }
 
 dependencies {
@@ -90,8 +103,9 @@ check {
 
 tasks.register('quality') {
 	group = 'verification'
-	description = 'Runs formatting checks, tests, and SonarLint.'
+	description = 'Runs formatting checks, tests, Javadoc, coverage verification, and SonarLint.'
 	dependsOn check
+	dependsOn javadoc
 	dependsOn tasks.matching { task ->
 		task.name.toLowerCase(Locale.ROOT).startsWith('sonarlint')
 		&& !task.name.toLowerCase(Locale.ROOT).contains('properties')
