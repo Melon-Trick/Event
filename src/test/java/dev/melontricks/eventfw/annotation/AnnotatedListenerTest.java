@@ -56,19 +56,22 @@ final class AnnotatedListenerTest {
     @Test
     void rejectsStaticHandlers() {
         EventBus bus = EventBuses.create();
-        assertThrows(InvalidListenerException.class, () -> bus.register(new StaticListener()));
+        StaticListener listener = new StaticListener();
+        assertThrows(InvalidListenerException.class, () -> bus.register(listener));
     }
 
     @Test
     void rejectsHandlersWithInvalidParameters() {
         EventBus bus = EventBuses.create();
-        assertThrows(InvalidListenerException.class, () -> bus.register(new InvalidParameterListener()));
+        InvalidParameterListener listener = new InvalidParameterListener();
+        assertThrows(InvalidListenerException.class, () -> bus.register(listener));
     }
 
     @Test
     void rejectsHandlersWithReturnValues() {
         EventBus bus = EventBuses.create();
-        assertThrows(InvalidListenerException.class, () -> bus.register(new ReturningListener()));
+        ReturningListener listener = new ReturningListener();
+        assertThrows(InvalidListenerException.class, () -> bus.register(listener));
     }
 
     private static class BaseListener {
@@ -114,12 +117,16 @@ final class AnnotatedListenerTest {
 
     private static final class StaticListener {
         @Subscribe
-        private static void handle(TestEvent event) {}
+        private static void handle(TestEvent event) {
+            throw new AssertionError(event);
+        }
     }
 
     private static final class InvalidParameterListener {
         @Subscribe
-        private void handle(String value) {}
+        private void handle(String value) {
+            throw new AssertionError(value);
+        }
     }
 
     private static final class ReturningListener {

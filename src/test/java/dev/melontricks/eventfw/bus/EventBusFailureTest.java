@@ -48,8 +48,8 @@ final class EventBusFailureTest {
         });
         bus.subscribe(TestEvent.class, event -> calls.add("unexpected"));
 
-        EventDispatchException exception =
-                assertThrows(EventDispatchException.class, () -> bus.publish(new TestEvent()));
+        TestEvent event = new TestEvent();
+        EventDispatchException exception = assertThrows(EventDispatchException.class, () -> bus.publish(event));
 
         assertEquals(FailureStage.HANDLER, exception.failure().stage());
         assertEquals(List.of(), calls);

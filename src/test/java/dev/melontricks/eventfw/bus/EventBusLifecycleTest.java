@@ -54,8 +54,9 @@ final class EventBusLifecycleTest {
         bus.close();
 
         assertTrue(bus.closed());
-        assertThrows(IllegalStateException.class, () -> bus.publish(new TestEvent(1)));
-        assertThrows(IllegalStateException.class, () -> bus.subscribe(TestEvent.class, event -> {}));
+        TestEvent event = new TestEvent(1);
+        assertThrows(IllegalStateException.class, () -> bus.publish(event));
+        assertThrows(IllegalStateException.class, () -> bus.subscribe(TestEvent.class, ignoredEvent -> {}));
     }
 
     @Test
