@@ -8,6 +8,8 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
 
 public final class EventBusBuilder {
+    private static final String VALUE_PARAMETER = "value";
+
     private TypeMatching typeMatching = TypeMatching.POLYMORPHIC;
     private FailurePolicy failurePolicy = FailurePolicy.CONTINUE;
     private EventExceptionHandler exceptionHandler =
@@ -18,22 +20,22 @@ public final class EventBusBuilder {
     EventBusBuilder() {}
 
     public EventBusBuilder typeMatching(TypeMatching value) {
-        typeMatching = Objects.requireNonNull(value, "value");
+        typeMatching = Objects.requireNonNull(value, VALUE_PARAMETER);
         return this;
     }
 
     public EventBusBuilder failurePolicy(FailurePolicy value) {
-        failurePolicy = Objects.requireNonNull(value, "value");
+        failurePolicy = Objects.requireNonNull(value, VALUE_PARAMETER);
         return this;
     }
 
     public EventBusBuilder exceptionHandler(EventExceptionHandler value) {
-        exceptionHandler = Objects.requireNonNull(value, "value");
+        exceptionHandler = Objects.requireNonNull(value, VALUE_PARAMETER);
         return this;
     }
 
     public EventBusBuilder asyncExecutor(Executor value) {
-        asyncExecutor = Objects.requireNonNull(value, "value");
+        asyncExecutor = Objects.requireNonNull(value, VALUE_PARAMETER);
         return this;
     }
 

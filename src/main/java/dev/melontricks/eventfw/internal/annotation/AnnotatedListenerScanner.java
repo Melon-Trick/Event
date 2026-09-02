@@ -4,8 +4,7 @@ import dev.melontricks.eventfw.annotation.InvalidListenerException;
 import dev.melontricks.eventfw.annotation.Subscribe;
 import dev.melontricks.eventfw.dispatch.EventContext;
 import dev.melontricks.eventfw.event.Event;
-import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodHandles;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -69,17 +68,14 @@ public final class AnnotatedListenerScanner {
         Method[] declaredMethods = type.getDeclaredMethods();
         Arrays.sort(declaredMethods, METHOD_ORDER);
         for (Method method : declaredMethods) {
-            if (method.isBridge() || method.isSynthetic()) {
-                continue;
-            }
-            MethodSignature signature = new MethodSignature(method.getName(), List.of(method.getParameterTypes()));
-            boolean privateMethod = Modifier.isPrivate(method.getModifiers());
-            if (!privateMethod && !shadowedMethods.add(signature)) {
-                continue;
-            }
-            Subscribe annotation = method.getAnnotation(Subscribe.class);
-            if (annotation != null) {
-                result.add(validateAndCreate(method, annotation));
+            if (!method.isBridge() && !method.isSynthetic()) {
+                MethodSignature signature = new MethodSignature(method.getName(), List.of(method.getParameterTypes()));
+                boolean privateMethod = Modifier.isPrivate(method.getModifiers());
+                boolean available = privateMethod || shadowedMethods.add(signature);
+                Subscribe annotation = method.getAnnotation(Subscribe.class);
+                if (available && annotation != null) {
+                    result.add(validateAndCreate(method, annotation));
+                }
             }
         }
     }
@@ -96,21 +92,16 @@ public final class AnnotatedListenerScanner {
         if ((parameters.length != 1 && !receivesContext) || !Event.class.isAssignableFrom(parameters[0])) {
             throw invalid(method, "must accept (Event) or (Event, EventContext)");
         }
-        try {
-            MethodHandles.Lookup lookup =
-                    MethodHandles.privateLookupIn(method.getDeclaringClass(), MethodHandles.lookup());
-            MethodHandle handle = lookup.unreflect(method);
-            return new AnnotatedMethod(
-                    eventType(parameters[0]),
-                    annotation.priority(),
-                    annotation.receiveCancelledEvents(),
-                    annotation.exactTypeOnly(),
-                    receivesContext,
-                    handle,
-                    method.toGenericString());
-        } catch (IllegalAccessException exception) {
-            throw new InvalidListenerException("Cannot access @Subscribe method " + method, exception);
+        if (!method.trySetAccessible()) {
+            throw new InvalidListenerException("Cannot access @Subscribe method " + method);
         }
+        return new AnnotatedMethod(
+                eventType(parameters[0]),
+                annotation.priority(),
+                annotation.receiveCancelledEvents(),
+                annotation.exactTypeOnly(),
+                receivesContext,
+                method);
     }
 
     private static InvalidListenerException invalid(Method method, String requirement) {
@@ -128,23 +119,30 @@ public final class AnnotatedListenerScanner {
             boolean receivesCancelledEvents,
             boolean exactTypeOnly,
             boolean receivesContext,
-            MethodHandle handle,
-            String description) {
-        public void invoke(Object listener, Event event, EventContext<Event> context) throws Exception {
+            Method method) {
+        public void invoke(Object listener, Event event, EventContext<Event> context) {
             try {
-                MethodHandle boundHandle = handle.bindTo(listener);
                 if (receivesContext) {
-                    boundHandle.invoke(event, context);
+                    method.invoke(listener, event, context);
                 } else {
-                    boundHandle.invoke(event);
+                    method.invoke(listener, event);
                 }
-            } catch (Exception exception) {
-                throw exception;
-            } catch (Error error) {
-                throw error;
-            } catch (Throwable throwable) {
-                throw new IllegalStateException("Annotated event handler failed: " + description, throwable);
+            } catch (IllegalAccessException exception) {
+                throw new InvalidListenerException("Cannot access @Subscribe method " + method, exception);
+            } catch (InvocationTargetException exception) {
+                rethrowTarget(exception);
             }
+        }
+
+        private void rethrowTarget(InvocationTargetException exception) {
+            Throwable target = exception.getCause();
+            if (target instanceof VirtualMachineError error) {
+                throw error;
+            }
+            if (target instanceof LinkageError error) {
+                throw error;
+            }
+            throw new ListenerInvocationException(method, target);
         }
     }
 

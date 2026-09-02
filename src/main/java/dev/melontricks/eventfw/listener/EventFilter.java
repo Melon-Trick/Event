@@ -5,5 +5,5 @@ import dev.melontricks.eventfw.event.Event;
 
 @FunctionalInterface
 public interface EventFilter<E extends Event> {
-    boolean test(E event, EventContext<E> context) throws Exception;
+    boolean test(E event, EventContext<E> context);
 }

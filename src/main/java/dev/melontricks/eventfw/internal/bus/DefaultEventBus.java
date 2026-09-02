@@ -16,6 +16,7 @@ import dev.melontricks.eventfw.internal.listener.CompositeRegistration;
 import dev.melontricks.eventfw.internal.listener.DefaultSubscription;
 import dev.melontricks.eventfw.internal.listener.DefaultSubscriptionBuilder;
 import dev.melontricks.eventfw.internal.listener.IdentityKey;
+import dev.melontricks.eventfw.internal.listener.SubscriptionConfiguration;
 import dev.melontricks.eventfw.listener.ContextualEventHandler;
 import dev.melontricks.eventfw.listener.EventFilter;
 import dev.melontricks.eventfw.listener.EventHandler;
@@ -111,13 +112,8 @@ public final class DefaultEventBus implements EventBus {
         DefaultSubscription<E> subscription = new DefaultSubscription<>(
                 this,
                 nextSubscriptionId.incrementAndGet(),
-                eventType,
-                priority,
-                owner,
-                filter,
-                receivesCancelledEvents,
-                exactTypeOnly,
-                handler);
+                new SubscriptionConfiguration<>(
+                        eventType, priority, owner, filter, receivesCancelledEvents, exactTypeOnly, handler));
         subscriptions
                 .computeIfAbsent(eventType, ignored -> new CopyOnWriteArrayList<>())
                 .add(subscription);
@@ -147,7 +143,7 @@ public final class DefaultEventBus implements EventBus {
                 registered.add(registerMethod(checkedListener, method));
             }
             return new CompositeRegistration(registered);
-        } catch (RuntimeException | Error failure) {
+        } catch (RuntimeException failure) {
             new CompositeRegistration(registered).close();
             throw failure;
         }
@@ -286,7 +282,7 @@ public final class DefaultEventBus implements EventBus {
                 accumulator.skip(1);
                 return;
             }
-        } catch (Exception exception) {
+        } catch (RuntimeException exception) {
             accumulator.skip(1);
             handleFailure(event, subscription, FailureStage.FILTER, exception, accumulator);
             return;
@@ -294,7 +290,7 @@ public final class DefaultEventBus implements EventBus {
         accumulator.invoke();
         try {
             subscription.invoke(event, context);
-        } catch (Exception exception) {
+        } catch (RuntimeException exception) {
             handleFailure(event, subscription, FailureStage.HANDLER, exception, accumulator);
         }
     }
@@ -303,7 +299,7 @@ public final class DefaultEventBus implements EventBus {
             Event event,
             Subscription subscription,
             FailureStage stage,
-            Exception cause,
+            RuntimeException cause,
             DispatchAccumulator accumulator) {
         ListenerFailure failure = new ListenerFailure(event, subscription, stage, cause);
         accumulator.fail(failure);
@@ -388,23 +384,25 @@ public final class DefaultEventBus implements EventBus {
         pending.add(new TypeDistance(concreteType, 0));
         while (!pending.isEmpty()) {
             TypeDistance current = pending.removeFirst();
-            if (!Event.class.isAssignableFrom(current.type())) {
-                continue;
-            }
-            Class<? extends Event> eventType = eventType(current.type());
-            Integer previous = distances.putIfAbsent(eventType, current.distance());
-            if (previous != null && previous <= current.distance()) {
-                continue;
-            }
-            Class<?> superclass = current.type().getSuperclass();
-            if (superclass != null) {
-                pending.addLast(new TypeDistance(superclass, current.distance() + 1));
-            }
-            for (Class<?> interfaceType : current.type().getInterfaces()) {
-                pending.addLast(new TypeDistance(interfaceType, current.distance() + 1));
+            if (Event.class.isAssignableFrom(current.type())) {
+                Class<? extends Event> eventType = eventType(current.type());
+                Integer previous = distances.putIfAbsent(eventType, current.distance());
+                if (previous == null || previous > current.distance()) {
+                    addParentTypes(pending, current);
+                }
             }
         }
         return distances;
+    }
+
+    private static void addParentTypes(ArrayDeque<TypeDistance> pending, TypeDistance current) {
+        Class<?> superclass = current.type().getSuperclass();
+        if (superclass != null) {
+            pending.addLast(new TypeDistance(superclass, current.distance() + 1));
+        }
+        for (Class<?> interfaceType : current.type().getInterfaces()) {
+            pending.addLast(new TypeDistance(interfaceType, current.distance() + 1));
+        }
     }
 
     private void invalidateCandidates() {

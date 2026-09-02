@@ -22,25 +22,17 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
     private final ContextualEventHandler<E> handler;
     private final AtomicBoolean active = new AtomicBoolean(true);
 
-    public DefaultSubscription(
-            DefaultEventBus bus,
-            long id,
-            Class<E> eventType,
-            int priority,
-            Object owner,
-            EventFilter<E> filter,
-            boolean receivesCancelledEvents,
-            boolean exactTypeOnly,
-            ContextualEventHandler<E> handler) {
+    public DefaultSubscription(DefaultEventBus bus, long id, SubscriptionConfiguration<E> configuration) {
         this.bus = Objects.requireNonNull(bus, "bus");
         this.id = id;
-        this.eventType = Objects.requireNonNull(eventType, "eventType");
-        this.priority = priority;
-        this.owner = owner;
-        this.filter = Objects.requireNonNull(filter, "filter");
-        this.receivesCancelledEvents = receivesCancelledEvents;
-        this.exactTypeOnly = exactTypeOnly;
-        this.handler = Objects.requireNonNull(handler, "handler");
+        SubscriptionConfiguration<E> checkedConfiguration = Objects.requireNonNull(configuration, "configuration");
+        eventType = checkedConfiguration.eventType();
+        priority = checkedConfiguration.priority();
+        owner = checkedConfiguration.owner();
+        filter = checkedConfiguration.filter();
+        receivesCancelledEvents = checkedConfiguration.receivesCancelledEvents();
+        exactTypeOnly = checkedConfiguration.exactTypeOnly();
+        handler = checkedConfiguration.handler();
     }
 
     @Override
@@ -89,11 +81,11 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
         }
     }
 
-    public boolean test(E event, EventContext<E> context) throws Exception {
+    public boolean test(E event, EventContext<E> context) {
         return filter.test(event, context);
     }
 
-    public void invoke(E event, EventContext<E> context) throws Exception {
+    public void invoke(E event, EventContext<E> context) {
         handler.handle(event, context);
     }
 

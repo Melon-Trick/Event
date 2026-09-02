@@ -5,5 +5,5 @@ import dev.melontricks.eventfw.event.Event;
 
 @FunctionalInterface
 public interface ContextualEventHandler<E extends Event> {
-    void handle(E event, EventContext<E> context) throws Exception;
+    void handle(E event, EventContext<E> context);
 }

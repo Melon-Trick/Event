@@ -3,7 +3,7 @@ package dev.melontricks.eventfw.dispatch;
 @SuppressWarnings("serial")
 public final class EventDispatchException extends RuntimeException {
     private static final long serialVersionUID = 1L;
-    private final ListenerFailure failure;
+    private final transient ListenerFailure failure;
 
     public EventDispatchException(ListenerFailure failure) {
         super(
