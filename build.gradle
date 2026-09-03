@@ -2,6 +2,7 @@ plugins {
 	id 'java-library'
 	id 'jacoco'
 	id 'maven-publish'
+	id 'me.champeau.jmh' version '0.7.3'
 	id 'com.diffplug.spotless' version '8.10.0'
 	id 'name.remal.sonarlint' version '7.1.6'
 }
@@ -38,6 +39,17 @@ dependencies {
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+jmh {
+	jmhVersion = '1.37'
+	warmupIterations = 3
+	iterations = 5
+	fork = 2
+	timeUnit = 'ns'
+	benchmarkMode = ['avgt']
+	resultFormat = 'JSON'
+	resultsFile = layout.buildDirectory.file('reports/jmh/results.json').get().asFile
+}
+
 tasks.withType(Test).configureEach {
 	useJUnitPlatform()
 	testLogging {
@@ -49,6 +61,7 @@ tasks.withType(Test).configureEach {
 spotless {
 	lineEndings = com.diffplug.spotless.LineEnding.UNIX
 	java {
+		target 'src/**/*.java'
 		palantirJavaFormat('2.97.0').formatJavadoc(true)
 		formatAnnotations()
 		removeUnusedImports()
