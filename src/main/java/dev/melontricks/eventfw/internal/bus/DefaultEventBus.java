@@ -41,6 +41,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 
 public final class DefaultEventBus implements EventBus {
@@ -60,6 +61,7 @@ public final class DefaultEventBus implements EventBus {
     private final ConcurrentMap<IdentityKey, CopyOnWriteArrayList<DefaultSubscription<?>>> subscriptionsByOwner =
             new ConcurrentHashMap<>();
     private final ConcurrentMap<Class<? extends Event>, ResolvedCandidates> candidateCache = new ConcurrentHashMap<>();
+    private final AtomicReference<FastCandidates> fastCandidates = new AtomicReference<>();
     private final AtomicLong nextSubscriptionId = new AtomicLong();
     private final AtomicLong nextDispatchSequence = new AtomicLong();
     private final AtomicLong subscriptionRevision = new AtomicLong();
@@ -68,7 +70,7 @@ public final class DefaultEventBus implements EventBus {
     private final LongAdder listenerInvocations = new LongAdder();
     private final LongAdder skippedListeners = new LongAdder();
     private final LongAdder listenerFailures = new LongAdder();
-    private final ThreadLocal<Integer> nestingDepth = ThreadLocal.withInitial(() -> 0);
+    private final ThreadLocal<DispatchNesting> dispatchNesting = ThreadLocal.withInitial(DispatchNesting::new);
     private final AtomicBoolean closed = new AtomicBoolean();
 
     public DefaultEventBus(
@@ -226,19 +228,16 @@ public final class DefaultEventBus implements EventBus {
         requireOpen();
         E checkedEvent = Objects.requireNonNull(event, "event");
         EventPhase checkedPhase = Objects.requireNonNull(phase, "phase");
-        int parentDepth = nestingDepth.get();
+        DispatchNesting nesting = dispatchNesting.get();
+        int parentDepth = nesting.depth;
         if (parentDepth >= maximumNestingDepth) {
             throw new IllegalStateException("maximum nested event dispatch depth exceeded");
         }
-        nestingDepth.set(parentDepth + 1);
+        nesting.depth = parentDepth + 1;
         try {
             return dispatch(checkedEvent, checkedPhase, parentDepth);
         } finally {
-            if (parentDepth == 0) {
-                nestingDepth.remove();
-            } else {
-                nestingDepth.set(parentDepth);
-            }
+            nesting.depth = parentDepth;
         }
     }
 
@@ -246,27 +245,32 @@ public final class DefaultEventBus implements EventBus {
         long startedNanos = System.nanoTime();
         long sequence = nextDispatchSequence.incrementAndGet();
         publishedEvents.increment();
-        DefaultEventContext<E> context = new DefaultEventContext<>(event, this, sequence, Instant.now(), phase, depth);
+        DefaultEventContext<E> context = new DefaultEventContext<>(
+                event, this, sequence, Instant.ofEpochMilli(System.currentTimeMillis()), phase, depth);
         List<Candidate> candidates = candidatesFor(eventType(event));
         DispatchAccumulator accumulator = new DispatchAccumulator();
-        for (int index = 0; index < candidates.size(); index++) {
-            if (context.propagationStopped()) {
-                accumulator.skip(candidates.size() - index);
-                break;
+        try {
+            for (int index = 0; index < candidates.size(); index++) {
+                if (context.propagationStopped()) {
+                    accumulator.skip(candidates.size() - index);
+                    break;
+                }
+                dispatchTo(candidates.get(index).subscription(), event, context, accumulator);
             }
-            dispatchTo(candidates.get(index).subscription(), event, context, accumulator);
+            return new DispatchResult<>(
+                    event,
+                    sequence,
+                    phase,
+                    candidates.size(),
+                    accumulator.invoked(),
+                    accumulator.skipped(),
+                    accumulator.failures(),
+                    isCancelled(event),
+                    context.propagationStopped(),
+                    Duration.ofNanos(System.nanoTime() - startedNanos));
+        } finally {
+            accumulator.recordMetrics();
         }
-        return new DispatchResult<>(
-                event,
-                sequence,
-                phase,
-                candidates.size(),
-                accumulator.invoked(),
-                accumulator.skipped(),
-                accumulator.failures(),
-                isCancelled(event),
-                context.propagationStopped(),
-                Duration.ofNanos(System.nanoTime() - startedNanos));
     }
 
     @SuppressWarnings("unchecked")
@@ -276,10 +280,7 @@ public final class DefaultEventBus implements EventBus {
             DefaultEventContext<E> context,
             DispatchAccumulator accumulator) {
         DefaultSubscription<E> subscription = (DefaultSubscription<E>) rawSubscription;
-        if (!subscription.active()
-                || subscription.paused()
-                || !subscription.phases().contains(context.phase())
-                || isCancelled(event) && !subscription.receivesCancelledEvents()) {
+        if (!subscription.eligible(context.phase(), isCancelled(event))) {
             accumulator.skip(1);
             return;
         }
@@ -357,19 +358,30 @@ public final class DefaultEventBus implements EventBus {
         if (closed.compareAndSet(false, true)) {
             clear();
             candidateCache.clear();
+            fastCandidates.set(null);
         }
+        dispatchNesting.remove();
     }
 
     private List<Candidate> candidatesFor(Class<? extends Event> concreteType) {
         while (true) {
             long revision = subscriptionRevision.get();
+            FastCandidates fast = fastCandidates.get();
+            if (fast != null
+                    && fast.concreteType() == concreteType
+                    && fast.resolved().revision() == revision) {
+                return fast.resolved().candidates();
+            }
             ResolvedCandidates cached = candidateCache.get(concreteType);
             if (cached != null && cached.revision() == revision) {
+                fastCandidates.set(new FastCandidates(concreteType, cached));
                 return cached.candidates();
             }
             List<Candidate> resolved = resolveCandidates(concreteType);
             if (subscriptionRevision.get() == revision) {
-                candidateCache.put(concreteType, new ResolvedCandidates(revision, resolved));
+                ResolvedCandidates current = new ResolvedCandidates(revision, resolved);
+                candidateCache.put(concreteType, current);
+                fastCandidates.set(new FastCandidates(concreteType, current));
                 return resolved;
             }
         }
@@ -423,6 +435,7 @@ public final class DefaultEventBus implements EventBus {
 
     private void invalidateCandidates() {
         subscriptionRevision.incrementAndGet();
+        fastCandidates.set(null);
         candidateCache.clear();
     }
 
@@ -447,28 +460,34 @@ public final class DefaultEventBus implements EventBus {
 
     private record Candidate(DefaultSubscription<?> subscription, int typeDistance) {}
 
+    private record FastCandidates(Class<? extends Event> concreteType, ResolvedCandidates resolved) {}
+
     private record ResolvedCandidates(long revision, List<Candidate> candidates) {}
 
     private record TypeDistance(Class<?> type, int distance) {}
 
+    private static final class DispatchNesting {
+        private int depth;
+    }
+
     private final class DispatchAccumulator {
-        private final List<ListenerFailure> failures = new ArrayList<>();
+        private List<ListenerFailure> failures;
         private int invoked;
         private int skipped;
 
         void invoke() {
             invoked++;
-            listenerInvocations.increment();
         }
 
         void skip(int count) {
             skipped += count;
-            skippedListeners.add(count);
         }
 
         void fail(ListenerFailure failure) {
+            if (failures == null) {
+                failures = new ArrayList<>();
+            }
             failures.add(failure);
-            listenerFailures.increment();
         }
 
         int invoked() {
@@ -480,7 +499,19 @@ public final class DefaultEventBus implements EventBus {
         }
 
         List<ListenerFailure> failures() {
-            return List.copyOf(failures);
+            return failures == null ? List.of() : failures;
+        }
+
+        void recordMetrics() {
+            if (invoked != 0) {
+                listenerInvocations.add(invoked);
+            }
+            if (skipped != 0) {
+                skippedListeners.add(skipped);
+            }
+            if (failures != null) {
+                listenerFailures.add(failures.size());
+            }
         }
     }
 }

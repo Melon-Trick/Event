@@ -5,10 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.melontricks.eventfw.dispatch.EventPhase;
 import dev.melontricks.eventfw.event.Event;
 import dev.melontricks.eventfw.listener.Subscription;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.LongAdder;
@@ -107,6 +109,9 @@ final class EventBusLifecycleTest {
         assertEquals(List.of(2), calls);
         assertFalse(subscription.active());
         assertFalse(subscription.paused());
+        assertFalse(subscription.receivesCancelledEvents());
+        assertEquals(Set.of(EventPhase.values()), subscription.phases());
+        assertTrue(subscription.owner().isEmpty());
     }
 
     @Test

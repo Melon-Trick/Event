@@ -7,15 +7,25 @@ import dev.melontricks.eventfw.internal.bus.DefaultEventBus;
 import dev.melontricks.eventfw.listener.ContextualEventHandler;
 import dev.melontricks.eventfw.listener.EventFilter;
 import dev.melontricks.eventfw.listener.Subscription;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public final class DefaultSubscription<E extends Event> implements Subscription {
     private static final int ENABLED = 0;
     private static final int PAUSED = 1;
     private static final int CLOSED = 2;
+    private static final VarHandle STATE_HANDLE;
+
+    static {
+        try {
+            STATE_HANDLE = MethodHandles.lookup().findVarHandle(DefaultSubscription.class, "state", int.class);
+        } catch (ReflectiveOperationException exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
+    }
 
     private final DefaultEventBus bus;
     private final long id;
@@ -26,9 +36,10 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
     private final boolean receivesCancelledEvents;
     private final boolean exactTypeOnly;
     private final Set<EventPhase> phases;
+    private final int phaseMask;
     private final boolean singleUse;
     private final ContextualEventHandler<E> handler;
-    private final AtomicInteger state = new AtomicInteger(ENABLED);
+    private volatile int state = ENABLED;
 
     public DefaultSubscription(DefaultEventBus bus, long id, SubscriptionConfiguration<E> configuration) {
         this.bus = Objects.requireNonNull(bus, "bus");
@@ -41,6 +52,7 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
         receivesCancelledEvents = checkedConfiguration.receivesCancelledEvents();
         exactTypeOnly = checkedConfiguration.exactTypeOnly();
         phases = checkedConfiguration.phases();
+        phaseMask = phaseMask(phases);
         singleUse = checkedConfiguration.singleUse();
         handler = checkedConfiguration.handler();
     }
@@ -82,17 +94,17 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
 
     @Override
     public boolean paused() {
-        return state.get() == PAUSED;
+        return state == PAUSED;
     }
 
     @Override
     public void pause() {
-        state.compareAndSet(ENABLED, PAUSED);
+        STATE_HANDLE.compareAndSet(this, ENABLED, PAUSED);
     }
 
     @Override
     public void resume() {
-        state.compareAndSet(PAUSED, ENABLED);
+        STATE_HANDLE.compareAndSet(this, PAUSED, ENABLED);
     }
 
     @Override
@@ -106,21 +118,25 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
 
     @Override
     public boolean active() {
-        return state.get() != CLOSED;
+        return state != CLOSED;
     }
 
     @Override
     public void close() {
-        if (state.getAndSet(CLOSED) != CLOSED) {
+        if ((int) STATE_HANDLE.getAndSet(this, CLOSED) != CLOSED) {
             bus.remove(this);
         }
     }
 
+    public boolean eligible(EventPhase phase, boolean cancelled) {
+        return state == ENABLED && (phaseMask & 1 << phase.ordinal()) != 0 && (!cancelled || receivesCancelledEvents);
+    }
+
     public boolean acquireForInvocation() {
         if (!singleUse) {
-            return state.get() == ENABLED;
+            return state == ENABLED;
         }
-        if (state.compareAndSet(ENABLED, CLOSED)) {
+        if (STATE_HANDLE.compareAndSet(this, ENABLED, CLOSED)) {
             bus.remove(this);
             return true;
         }
@@ -128,10 +144,18 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
     }
 
     public boolean test(E event, EventContext<E> context) {
-        return filter.test(event, context);
+        return filter == null || filter.test(event, context);
     }
 
     public void invoke(E event, EventContext<E> context) {
         handler.handle(event, context);
+    }
+
+    private static int phaseMask(Set<EventPhase> phases) {
+        int mask = 0;
+        for (EventPhase phase : phases) {
+            mask |= 1 << phase.ordinal();
+        }
+        return mask;
     }
 }

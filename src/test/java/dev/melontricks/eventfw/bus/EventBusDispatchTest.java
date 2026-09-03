@@ -151,6 +151,23 @@ final class EventBusDispatchTest {
         assertEquals(List.of("outer:0", "inner:1", "after-inner", "after-outer"), calls);
     }
 
+    @Test
+    void topLevelDepthIsResetAfterNestedPublication() {
+        EventBus bus = EventBuses.create();
+        List<Integer> depths = new ArrayList<>();
+        bus.subscribe(ChildEvent.class, (event, context) -> {
+            depths.add(context.nestingDepth());
+            if (event.value().equals("outer")) {
+                context.publisher().publish(new ChildEvent("inner"));
+            }
+        });
+
+        bus.publish(new ChildEvent("outer"));
+        bus.publish(new ChildEvent("next"));
+
+        assertEquals(List.of(0, 1, 0), depths);
+    }
+
     private static class ParentEvent implements Event {
         private final String value;
 

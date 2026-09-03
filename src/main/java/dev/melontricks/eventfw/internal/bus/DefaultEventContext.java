@@ -6,7 +6,6 @@ import dev.melontricks.eventfw.dispatch.EventPhase;
 import dev.melontricks.eventfw.event.Event;
 import java.time.Instant;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 final class DefaultEventContext<E extends Event> implements EventContext<E> {
     private final E event;
@@ -15,7 +14,7 @@ final class DefaultEventContext<E extends Event> implements EventContext<E> {
     private final Instant publishedAt;
     private final EventPhase phase;
     private final int nestingDepth;
-    private final AtomicBoolean propagationStopped = new AtomicBoolean();
+    private volatile boolean propagationStopped;
 
     DefaultEventContext(
             E event, EventPublisher publisher, long sequence, Instant publishedAt, EventPhase phase, int nestingDepth) {
@@ -59,11 +58,11 @@ final class DefaultEventContext<E extends Event> implements EventContext<E> {
 
     @Override
     public boolean propagationStopped() {
-        return propagationStopped.get();
+        return propagationStopped;
     }
 
     @Override
     public void stopPropagation() {
-        propagationStopped.set(true);
+        propagationStopped = true;
     }
 }

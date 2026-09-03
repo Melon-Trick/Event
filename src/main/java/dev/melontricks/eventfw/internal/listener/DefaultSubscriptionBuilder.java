@@ -19,7 +19,7 @@ public final class DefaultSubscriptionBuilder<E extends Event> implements EventS
     private final Class<E> eventType;
     private int priority = EventPriority.NORMAL.value();
     private Object owner;
-    private EventFilter<E> filter = (_, _) -> true;
+    private EventFilter<E> filter;
     private boolean receivesCancelledEvents;
     private boolean exactTypeOnly;
     private Set<EventPhase> phases = Set.of(EventPhase.values());

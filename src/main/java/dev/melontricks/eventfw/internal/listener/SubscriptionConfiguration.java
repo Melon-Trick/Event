@@ -19,7 +19,6 @@ public record SubscriptionConfiguration<E extends Event>(
         ContextualEventHandler<E> handler) {
     public SubscriptionConfiguration {
         Objects.requireNonNull(eventType, "eventType");
-        Objects.requireNonNull(filter, "filter");
         phases = Set.copyOf(Objects.requireNonNull(phases, "phases"));
         if (phases.isEmpty()) {
             throw new IllegalArgumentException("phases must not be empty");
