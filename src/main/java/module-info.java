@@ -5,10 +5,10 @@
  * implementation packages remain encapsulated and may change without affecting source or binary compatibility of the
  * exported API.
  */
-module dev.melontricks.eventfw {
-    exports dev.melontricks.eventfw.annotation;
-    exports dev.melontricks.eventfw.bus;
-    exports dev.melontricks.eventfw.dispatch;
-    exports dev.melontricks.eventfw.event;
-    exports dev.melontricks.eventfw.listener;
+module dev.vriege.eventfw {
+    exports dev.vriege.eventfw.annotation;
+    exports dev.vriege.eventfw.bus;
+    exports dev.vriege.eventfw.dispatch;
+    exports dev.vriege.eventfw.event;
+    exports dev.vriege.eventfw.listener;
 }
