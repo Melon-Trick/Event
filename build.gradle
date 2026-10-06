@@ -126,7 +126,25 @@ tasks.register('quality') {
 	}
 }
 
+version = providers.gradleProperty('releaseVersion').orElse(providers.gradleProperty('version')).get()
+
 publishing {
+	repositories {
+		maven {
+			name = 'GitHubPackages'
+			url = uri('https://maven.pkg.github.com/melon-trick/Event')
+			credentials {
+				username = providers.environmentVariable('GITHUB_ACTOR').orNull
+				password = providers.environmentVariable('GITHUB_TOKEN').orNull
+			}
+		}
+		maven {
+			name = 'Validation'
+			url = uri(providers.gradleProperty('validationRepository').orElse(layout.buildDirectory.dir('repository').map {
+				it.asFile.toURI().toString()
+			}).get())
+		}
+	}
 	publications {
 		library(MavenPublication) {
 			from components.java

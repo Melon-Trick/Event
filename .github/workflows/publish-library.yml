@@ -1,0 +1,42 @@
+name: Publish library
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Immutable x.y.z release version'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: packages-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Validate immutable release version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:RELEASE_VERSION -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'Use an immutable x.y.z version.' }
+      - name: Verify and publish immutable library
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew.bat --no-daemon --no-configuration-cache quality "-PreleaseVersion=$env:RELEASE_VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./gradlew.bat --no-daemon --no-configuration-cache publishAllPublicationsToGitHubPackagesRepository "-PreleaseVersion=$env:RELEASE_VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
