@@ -10,8 +10,8 @@ import java.util.Objects;
  *
  * <p>{@code matchedListeners} counts the ordered candidate snapshot. {@code invokedListeners} counts handler attempts,
  * including handlers that failed. {@code skippedListeners} counts candidates rejected because they were closed, paused,
- * phase-incompatible, cancellation-incompatible, filtered, lost a single-use race, or remained after propagation
- * stopped.
+ * channel-incompatible, phase-incompatible, cancellation-incompatible, filtered, async-only during synchronous
+ * publication, lost an invocation-limit race, or remained after propagation stopped.
  *
  * @param event exact published event instance
  * @param sequence positive sequence unique within the bus

@@ -1,11 +1,19 @@
 package dev.vriege.eventfw.bus;
 
+import dev.vriege.eventfw.diagnostic.DispatchObserver;
 import dev.vriege.eventfw.dispatch.EventExceptionHandler;
 import dev.vriege.eventfw.dispatch.FailurePolicy;
+import dev.vriege.eventfw.internal.bus.BusConfiguration;
 import dev.vriege.eventfw.internal.bus.DefaultEventBus;
+import dev.vriege.eventfw.internal.execution.EventTimers;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Configures immutable policies shared by every dispatch on a newly created bus.
@@ -22,8 +30,51 @@ public final class EventBusBuilder {
             EventExceptionHandler.logging(System.getLogger("dev.vriege.eventfw"));
     private Executor asyncExecutor = ForkJoinPool.commonPool();
     private int maximumNestingDepth = 64;
+    private ScheduledExecutorService scheduler = EventTimers.scheduler();
+    private final Map<String, Executor> namedExecutors = new HashMap<>();
+    private final List<DispatchObserver> observers = new ArrayList<>();
 
     EventBusBuilder() {}
+
+    /**
+     * Adds an outcome observer in notification order. Observer runtime failures are isolated and logged.
+     *
+     * @param observer non-null observer, which must support concurrent callbacks
+     * @return this builder
+     */
+    public EventBusBuilder observe(DispatchObserver observer) {
+        observers.add(Objects.requireNonNull(observer, "observer"));
+        return this;
+    }
+
+    /**
+     * Supplies the borrowed scheduler used for subscription expiration and event-wait deadlines. The default is a
+     * shared daemon timer with cancelled-task removal. Closing a bus never shuts down either scheduler.
+     *
+     * @param value non-null scheduler
+     * @return this builder
+     */
+    public EventBusBuilder scheduler(ScheduledExecutorService value) {
+        scheduler = Objects.requireNonNull(value, VALUE_PARAMETER);
+        return this;
+    }
+
+    /**
+     * Registers or replaces a borrowed executor referenced by annotated execution policies.
+     *
+     * @param name non-blank executor identity
+     * @param executor non-null executor
+     * @return this builder
+     * @throws IllegalArgumentException if the name is blank
+     */
+    public EventBusBuilder executor(String name, Executor executor) {
+        Objects.requireNonNull(name, "name");
+        if (name.isBlank()) {
+            throw new IllegalArgumentException("executor name must not be blank");
+        }
+        namedExecutors.put(name, Objects.requireNonNull(executor, "executor"));
+        return this;
+    }
 
     /**
      * Selects exact or polymorphic event-type matching.
@@ -104,6 +155,14 @@ public final class EventBusBuilder {
      * @return a new open event bus
      */
     public EventBus build() {
-        return new DefaultEventBus(typeMatching, failurePolicy, exceptionHandler, asyncExecutor, maximumNestingDepth);
+        return new DefaultEventBus(new BusConfiguration(
+                typeMatching,
+                failurePolicy,
+                exceptionHandler,
+                asyncExecutor,
+                maximumNestingDepth,
+                scheduler,
+                Map.copyOf(namedExecutors),
+                List.copyOf(observers)));
     }
 }

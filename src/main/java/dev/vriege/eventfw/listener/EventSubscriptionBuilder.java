@@ -2,7 +2,13 @@ package dev.vriege.eventfw.listener;
 
 import dev.vriege.eventfw.dispatch.EventPhase;
 import dev.vriege.eventfw.event.Event;
+import dev.vriege.eventfw.execution.ExecutionBuilder;
+import dev.vriege.eventfw.scope.SubscriptionScope;
+import java.time.Duration;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Configures and installs programmatic subscriptions for one event type.
@@ -15,6 +21,78 @@ import java.util.Set;
  * @param <E> subscribed event type
  */
 public interface EventSubscriptionBuilder<E extends Event> {
+    /**
+     * Attaches subscriptions created by this builder to a lifecycle scope.
+     *
+     * @param scope non-null scope; a closed scope rejects and closes the new subscription
+     * @return this builder
+     */
+    EventSubscriptionBuilder<E> scope(SubscriptionScope scope);
+
+    /**
+     * Selects a channel, replacing the previous selection. Default-channel listeners do not observe named channels.
+     *
+     * @param channel non-null name, empty for the default channel
+     * @return this builder
+     */
+    EventSubscriptionBuilder<E> channel(String channel);
+
+    /**
+     * Adds a short-circuit event-only filter, combined with previous filters using conjunction.
+     *
+     * @param predicate non-null predicate
+     * @return this builder
+     */
+    default EventSubscriptionBuilder<E> filter(Predicate<? super E> predicate) {
+        Objects.requireNonNull(predicate, "predicate");
+        return filter((event, _) -> predicate.test(event));
+    }
+
+    /**
+     * Limits atomic invocation claims across concurrent publishers. Failed handlers consume a claim; filters do not.
+     * The last claim removes the subscription before starting its handler. Replaces any previous limit or once setting.
+     *
+     * @param maximum positive invocation-attempt limit
+     * @return this builder
+     * @throws IllegalArgumentException if maximum is not positive
+     */
+    EventSubscriptionBuilder<E> limit(long maximum);
+
+    /**
+     * Schedules removal after installation. Expiration does not interrupt already claimed invocations.
+     *
+     * @param duration positive lifetime representable in nanoseconds
+     * @return this builder
+     * @throws IllegalArgumentException if the lifetime is not positive
+     * @throws ArithmeticException if the lifetime exceeds the nanosecond range
+     */
+    EventSubscriptionBuilder<E> expireAfter(Duration duration);
+
+    /**
+     * Captures an execution policy for subscriptions created afterwards. Such subscriptions require publishAsync,
+     * including when their handler returns void. The callback receives a fresh builder with default options.
+     *
+     * @param configuration non-null execution configuration callback
+     * @return this builder
+     */
+    EventSubscriptionBuilder<E> execution(Consumer<ExecutionBuilder<E>> configuration);
+
+    /**
+     * Installs a stage-returning handler whose completion is awaited by asynchronous dispatch.
+     *
+     * @param handler non-null handler returning non-null stages
+     * @return installed subscription
+     */
+    Subscription subscribeAsync(AsyncEventHandler<? super E> handler);
+
+    /**
+     * Installs a stage-returning contextual handler, preserving ordered propagation across stage completion.
+     *
+     * @param handler non-null handler returning non-null stages
+     * @return installed subscription
+     */
+    Subscription subscribeAsync(ContextualAsyncEventHandler<E> handler);
+
     /**
      * Sets an arbitrary numeric priority.
      *
@@ -46,7 +124,7 @@ public interface EventSubscriptionBuilder<E extends Event> {
     EventSubscriptionBuilder<E> owner(Object owner);
 
     /**
-     * Sets the predicate evaluated immediately before handler invocation.
+     * Adds a predicate evaluated immediately before handler invocation. Repeated calls compose using short-circuit AND.
      *
      * @param filter non-null event filter
      * @return this builder

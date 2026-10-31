@@ -5,15 +5,45 @@ import dev.vriege.eventfw.event.Event;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletionStage;
 
 /**
  * Exposes the immutable configuration and mutable lifecycle of one registered listener.
  *
- * <p>A subscription strongly references its handler, filter, and optional owner until it is closed or a single-use
- * invocation consumes it. Lifecycle operations are thread-safe and idempotent. Closing is permanent; pausing is
- * reversible only while the subscription remains registered.
+ * <p>A subscription handle strongly references its handler, filter, and optional owner. Removal releases the bus's
+ * references to the subscription; applications must also release retained handles to allow captured objects to be
+ * collected. Lifecycle operations are thread-safe and idempotent. Closing is permanent; pausing is reversible only
+ * while the subscription remains registered.
  */
 public interface Subscription extends Registration {
+    /**
+     * Observes removal without exposing a completable internal future. Completion may precede the end of an invocation
+     * already claimed, including the last allowed invocation. Callbacks should be short and non-blocking.
+     *
+     * @return read-only completion stage completed when this subscription is removed
+     */
+    CompletionStage<Void> whenClosed();
+
+    /**
+     * Returns the selected channel.
+     *
+     * @return non-null channel, empty for the default channel
+     */
+    String channel();
+
+    /**
+     * Returns the configured invocation-attempt limit; failed handlers consume attempts, rejected filters do not.
+     *
+     * @return positive limit or {@link Long#MAX_VALUE} for unlimited delivery
+     */
+    long invocationLimit();
+
+    /**
+     * Reports whether this subscription requires asynchronous publication.
+     *
+     * @return true for stage-returning handlers or explicit execution policies
+     */
+    boolean asynchronous();
     /**
      * Returns the monotonically increasing identifier assigned by the owning bus.
      *

@@ -1,6 +1,9 @@
 package dev.vriege.eventfw.internal.annotation;
 
+import dev.vriege.eventfw.annotation.Execution;
+import dev.vriege.eventfw.annotation.ExpireAfter;
 import dev.vriege.eventfw.annotation.InvalidListenerException;
+import dev.vriege.eventfw.annotation.InvocationLimit;
 import dev.vriege.eventfw.annotation.Subscribe;
 import dev.vriege.eventfw.dispatch.EventContext;
 import dev.vriege.eventfw.dispatch.EventPhase;
@@ -8,12 +11,14 @@ import dev.vriege.eventfw.event.Event;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletionStage;
 
 public final class AnnotatedListenerScanner {
     private static final Comparator<Method> METHOD_ORDER =
@@ -85,8 +90,8 @@ public final class AnnotatedListenerScanner {
         if (Modifier.isStatic(method.getModifiers())) {
             throw invalid(method, "must not be static");
         }
-        if (method.getReturnType() != void.class) {
-            throw invalid(method, "must return void");
+        if (method.getReturnType() != void.class && !CompletionStage.class.isAssignableFrom(method.getReturnType())) {
+            throw invalid(method, "must return void or CompletionStage");
         }
         Class<?>[] parameters = method.getParameterTypes();
         boolean receivesContext = parameters.length == 2 && parameters[1] == EventContext.class;
@@ -96,6 +101,7 @@ public final class AnnotatedListenerScanner {
         if (!method.trySetAccessible()) {
             throw new InvalidListenerException("Cannot access @Subscribe method " + method);
         }
+        validateOptions(method, annotation);
         return new AnnotatedMethod(
                 eventType(parameters[0]),
                 annotation.priority(),
@@ -105,6 +111,41 @@ public final class AnnotatedListenerScanner {
                 annotation.once(),
                 receivesContext,
                 method);
+    }
+
+    private static void validateOptions(Method method, Subscribe annotation) {
+        InvocationLimit limit = method.getAnnotation(InvocationLimit.class);
+        if (limit != null && (limit.value() < 1 || annotation.once() && limit.value() != 1)) {
+            throw invalid(method, "has an invalid or conflicting invocation limit");
+        }
+        ExpireAfter expiration = method.getAnnotation(ExpireAfter.class);
+        if (expiration != null) {
+            duration(method, expiration.value(), expiration.unit());
+        }
+        Execution execution = method.getAnnotation(Execution.class);
+        if (execution != null) {
+            validateExecution(method, execution);
+        }
+    }
+
+    public static void validateExecution(Method method, Execution execution) {
+        if (execution.capacity() < 1 || execution.timeout() < 0) {
+            throw invalid(method, "has an invalid execution policy");
+        }
+        if (execution.timeout() > 0) {
+            duration(method, execution.timeout(), execution.timeoutUnit());
+        }
+    }
+
+    public static Duration duration(Method method, long value, java.util.concurrent.TimeUnit unit) {
+        if (value < 1) {
+            throw invalid(method, "requires a positive duration");
+        }
+        try {
+            return Duration.ofNanos(Duration.of(value, unit.toChronoUnit()).toNanos());
+        } catch (ArithmeticException _) {
+            throw invalid(method, "duration exceeds the supported nanosecond range");
+        }
     }
 
     private static InvalidListenerException invalid(Method method, String requirement) {
@@ -125,21 +166,20 @@ public final class AnnotatedListenerScanner {
             boolean singleUse,
             boolean receivesContext,
             Method method) {
-        public void invoke(Object listener, Event event, EventContext<Event> context) {
+        public Object invoke(Object listener, Event event, EventContext<Event> context) {
             try {
                 if (receivesContext) {
-                    method.invoke(listener, event, context);
-                } else {
-                    method.invoke(listener, event);
+                    return method.invoke(listener, event, context);
                 }
+                return method.invoke(listener, event);
             } catch (IllegalAccessException exception) {
                 throw new InvalidListenerException("Cannot access @Subscribe method " + method, exception);
             } catch (InvocationTargetException exception) {
-                rethrowTarget(exception);
+                throw invocationFailure(exception);
             }
         }
 
-        private void rethrowTarget(InvocationTargetException exception) {
+        private RuntimeException invocationFailure(InvocationTargetException exception) {
             Throwable target = exception.getCause();
             if (target instanceof VirtualMachineError error) {
                 throw error;
@@ -147,7 +187,7 @@ public final class AnnotatedListenerScanner {
             if (target instanceof LinkageError error) {
                 throw error;
             }
-            throw new ListenerInvocationException(method, target);
+            return new ListenerInvocationException(method, target);
         }
     }
 

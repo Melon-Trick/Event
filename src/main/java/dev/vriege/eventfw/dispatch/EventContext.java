@@ -3,6 +3,9 @@ package dev.vriege.eventfw.dispatch;
 import dev.vriege.eventfw.bus.EventPublisher;
 import dev.vriege.eventfw.event.Event;
 import java.time.Instant;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Exposes immutable metadata and a shared propagation control for one dispatch.
@@ -13,6 +16,31 @@ import java.time.Instant;
  * @param <E> concrete published event type
  */
 public interface EventContext<E extends Event> {
+    /**
+     * Returns the publication's channel.
+     *
+     * @return non-null channel, empty for the default channel
+     */
+    String channel();
+
+    /**
+     * Returns immutable dispatch attributes. Values are shared references and are not deep-copied.
+     *
+     * @return immutable, non-null attribute map
+     */
+    Map<AttributeKey<?>, Object> attributes();
+
+    /**
+     * Retrieves a typed attribute without unchecked caller casts.
+     *
+     * @param key non-null attribute key
+     * @param <T> attribute value type
+     * @return value or empty when absent
+     */
+    default <T> Optional<T> attribute(AttributeKey<T> key) {
+        Objects.requireNonNull(key, "key");
+        return Optional.ofNullable(key.type().cast(attributes().get(key)));
+    }
     /**
      * Returns the exact object supplied to publication.
      *

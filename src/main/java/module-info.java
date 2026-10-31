@@ -6,9 +6,15 @@
  * exported API.
  */
 module dev.vriege.eventfw {
+    requires jdk.jfr;
+
     exports dev.vriege.eventfw.annotation;
     exports dev.vriege.eventfw.bus;
     exports dev.vriege.eventfw.dispatch;
     exports dev.vriege.eventfw.event;
     exports dev.vriege.eventfw.listener;
+    exports dev.vriege.eventfw.await;
+    exports dev.vriege.eventfw.diagnostic;
+    exports dev.vriege.eventfw.execution;
+    exports dev.vriege.eventfw.scope;
 }

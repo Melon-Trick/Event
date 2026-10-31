@@ -2,6 +2,7 @@ package dev.vriege.eventfw.listener;
 
 import dev.vriege.eventfw.dispatch.EventContext;
 import dev.vriege.eventfw.event.Event;
+import java.util.Objects;
 
 /**
  * Tests a matching event immediately before its handler becomes eligible for invocation.
@@ -23,4 +24,35 @@ public interface EventFilter<E extends Event> {
      * @return {@code true} to continue to the handler; {@code false} to skip it
      */
     boolean test(E event, EventContext<E> context);
+
+    /**
+     * Combines this filter with another using short-circuit conjunction.
+     *
+     * @param other non-null second filter
+     * @return filter evaluating the second operand only if this filter accepts
+     */
+    default EventFilter<E> and(EventFilter<E> other) {
+        Objects.requireNonNull(other, "other");
+        return (event, context) -> test(event, context) && other.test(event, context);
+    }
+
+    /**
+     * Combines this filter with another using short-circuit disjunction.
+     *
+     * @param other non-null second filter
+     * @return filter evaluating the second operand only if this filter rejects
+     */
+    default EventFilter<E> or(EventFilter<E> other) {
+        Objects.requireNonNull(other, "other");
+        return (event, context) -> test(event, context) || other.test(event, context);
+    }
+
+    /**
+     * Inverts this filter without suppressing exceptions.
+     *
+     * @return negated filter
+     */
+    default EventFilter<E> negate() {
+        return (event, context) -> !test(event, context);
+    }
 }

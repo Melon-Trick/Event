@@ -1,11 +1,18 @@
 package dev.vriege.eventfw.bus;
 
+import dev.vriege.eventfw.await.AwaitBuilder;
+import dev.vriege.eventfw.diagnostic.SubscriptionDiagnostic;
+import dev.vriege.eventfw.dispatch.DispatchOptions;
 import dev.vriege.eventfw.event.Event;
+import dev.vriege.eventfw.event.EventKey;
 import dev.vriege.eventfw.listener.ContextualEventHandler;
 import dev.vriege.eventfw.listener.EventHandler;
 import dev.vriege.eventfw.listener.EventSubscriptionBuilder;
 import dev.vriege.eventfw.listener.Registration;
 import dev.vriege.eventfw.listener.Subscription;
+import dev.vriege.eventfw.scope.SubscriptionScope;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * Combines event publication, listener registration, lifecycle management, and metrics.
@@ -18,6 +25,66 @@ import dev.vriege.eventfw.listener.Subscription;
  * rejects new publications and registrations, removes all subscriptions, and leaves the executor running.
  */
 public interface EventBus extends EventPublisher, AutoCloseable {
+    /**
+     * Configures subscriptions on a typed channel without installing a listener.
+     *
+     * @param key non-null event contract and channel
+     * @param <E> event type
+     * @return new subscription builder
+     */
+    default <E extends Event> EventSubscriptionBuilder<E> on(EventKey<E> key) {
+        return on(key.eventType()).channel(key.name());
+    }
+
+    /**
+     * Configures an inactive, cancellable wait for a matching event.
+     *
+     * @param eventType non-null event contract
+     * @param <E> event type
+     * @return new wait builder; no listener is installed until start
+     */
+    <E extends Event> AwaitBuilder<E> await(Class<E> eventType);
+
+    /**
+     * Configures an inactive wait on a typed channel.
+     *
+     * @param key non-null event contract and channel
+     * @param <E> event type
+     * @return new wait builder
+     */
+    default <E extends Event> AwaitBuilder<E> await(EventKey<E> key) {
+        return await(key.eventType()).channel(key.name());
+    }
+
+    /**
+     * Registers an annotated listener and attaches its registration to a scope. Scope rejection removes all newly
+     * installed subscriptions. The scope is independent of the listener's identity-based owner.
+     *
+     * @param listener non-null annotated listener
+     * @param scope non-null scope
+     * @return aggregate registration
+     */
+    default Registration register(Object listener, SubscriptionScope scope) {
+        Objects.requireNonNull(scope, "scope");
+        return scope.track(register(listener));
+    }
+
+    /**
+     * Returns current subscriptions ordered by installation identifier, including paused subscriptions.
+     *
+     * @return immutable, weakly consistent snapshot of live handles
+     */
+    List<Subscription> subscriptions();
+
+    /**
+     * Explains structural eligibility in dispatch order without executing filters or handlers or consuming limits.
+     * Concurrent changes may invalidate the explanation immediately. Only type-matching candidates are included.
+     *
+     * @param event non-null event to inspect
+     * @param options non-null selection options
+     * @return immutable diagnostic snapshot
+     */
+    List<SubscriptionDiagnostic> inspect(Event event, DispatchOptions options);
     /**
      * Registers a simple handler with default options.
      *

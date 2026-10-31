@@ -10,7 +10,8 @@ import java.lang.annotation.Target;
 /**
  * Marks an instance method for declarative registration with an event bus.
  *
- * <p>A valid method returns {@code void} and has one of the following signatures:
+ * <p>A valid method returns {@code void} or a {@link java.util.concurrent.CompletionStage} and has one of the following
+ * parameter shapes:
  *
  * <ul>
  *   <li>{@code void method(MyEvent event)}
@@ -18,8 +19,9 @@ import java.lang.annotation.Target;
  * </ul>
  *
  * <p>The first parameter must implement {@link dev.vriege.eventfw.event.Event}. The optional second parameter must
- * erase exactly to {@link dev.vriege.eventfw.dispatch.EventContext}. Static methods, non-void methods, and every other
- * parameter shape are rejected before registration begins.
+ * erase exactly to {@link dev.vriege.eventfw.dispatch.EventContext}. Stage-returning methods require asynchronous
+ * publication and must return non-null stages. Static methods, unsupported return types, and every other parameter
+ * shape are rejected before registration begins.
  *
  * <p>Private, package-private, protected, public, inherited, and interface methods are discovered. Method discovery is
  * deterministic. An overriding subclass method shadows the corresponding inherited method even when the override is not

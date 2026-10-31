@@ -4,6 +4,8 @@ import dev.vriege.eventfw.dispatch.EventContext;
 import dev.vriege.eventfw.dispatch.EventPhase;
 import dev.vriege.eventfw.event.Event;
 import dev.vriege.eventfw.internal.bus.DefaultEventBus;
+import dev.vriege.eventfw.internal.execution.InvocationDispatcher;
+import dev.vriege.eventfw.listener.ContextualAsyncEventHandler;
 import dev.vriege.eventfw.listener.ContextualEventHandler;
 import dev.vriege.eventfw.listener.EventFilter;
 import dev.vriege.eventfw.listener.Subscription;
@@ -12,6 +14,9 @@ import java.lang.invoke.VarHandle;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class DefaultSubscription<E extends Event> implements Subscription {
     private static final int ENABLED = 0;
@@ -37,7 +42,12 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
     private final boolean exactTypeOnly;
     private final Set<EventPhase> phases;
     private final int phaseMask;
-    private final boolean singleUse;
+    private final long invocationLimit;
+    private final AtomicLong remaining;
+    private final String channel;
+    private final ContextualAsyncEventHandler<E> asyncHandler;
+    private final InvocationDispatcher<E> dispatcher;
+    private CompletableFuture<Void> closedCompletion;
     private final ContextualEventHandler<E> handler;
     private volatile int state = ENABLED;
 
@@ -53,7 +63,13 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
         exactTypeOnly = checkedConfiguration.exactTypeOnly();
         phases = checkedConfiguration.phases();
         phaseMask = phaseMask(phases);
-        singleUse = checkedConfiguration.singleUse();
+        invocationLimit = checkedConfiguration.invocationLimit();
+        remaining = invocationLimit == Long.MAX_VALUE ? null : new AtomicLong(invocationLimit);
+        channel = checkedConfiguration.channel();
+        asyncHandler = checkedConfiguration.asyncHandler();
+        dispatcher = checkedConfiguration.execution() == null
+                ? null
+                : new InvocationDispatcher<>(checkedConfiguration.execution());
         handler = checkedConfiguration.handler();
     }
 
@@ -89,7 +105,33 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
 
     @Override
     public boolean singleUse() {
-        return singleUse;
+        return invocationLimit == 1;
+    }
+
+    @Override
+    public String channel() {
+        return channel;
+    }
+
+    @Override
+    public long invocationLimit() {
+        return invocationLimit;
+    }
+
+    @Override
+    public boolean asynchronous() {
+        return asyncHandler != null || dispatcher != null;
+    }
+
+    @Override
+    public synchronized CompletionStage<Void> whenClosed() {
+        if (closedCompletion == null) {
+            closedCompletion = new CompletableFuture<>();
+            if (!active()) {
+                closedCompletion.complete(null);
+            }
+        }
+        return closedCompletion.minimalCompletionStage();
     }
 
     @Override
@@ -125,6 +167,17 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
     public void close() {
         if ((int) STATE_HANDLE.getAndSet(this, CLOSED) != CLOSED) {
             bus.remove(this);
+            signalClosed();
+        }
+    }
+
+    private void signalClosed() {
+        CompletableFuture<Void> completion;
+        synchronized (this) {
+            completion = closedCompletion;
+        }
+        if (completion != null) {
+            completion.complete(null);
         }
     }
 
@@ -133,12 +186,20 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
     }
 
     public boolean acquireForInvocation() {
-        if (!singleUse) {
+        if (remaining == null) {
             return state == ENABLED;
         }
-        if (STATE_HANDLE.compareAndSet(this, ENABLED, CLOSED)) {
-            bus.remove(this);
-            return true;
+        while (state == ENABLED) {
+            long available = remaining.get();
+            if (available == 0) {
+                return false;
+            }
+            if (remaining.compareAndSet(available, available - 1)) {
+                if (available == 1) {
+                    close();
+                }
+                return true;
+            }
         }
         return false;
     }
@@ -149,6 +210,21 @@ public final class DefaultSubscription<E extends Event> implements Subscription 
 
     public void invoke(E event, EventContext<E> context) {
         handler.handle(event, context);
+    }
+
+    public CompletionStage<Void> invokeAsync(E event, EventContext<E> context) {
+        if (dispatcher != null) {
+            return dispatcher.submit(event, () -> startAsync(event, context));
+        }
+        return startAsync(event, context).thenApply(_ -> null);
+    }
+
+    private CompletionStage<?> startAsync(E event, EventContext<E> context) {
+        if (asyncHandler != null) {
+            return Objects.requireNonNull(asyncHandler.handle(event, context), "handler stage");
+        }
+        invoke(event, context);
+        return CompletableFuture.completedFuture(null);
     }
 
     private static int phaseMask(Set<EventPhase> phases) {
