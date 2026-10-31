@@ -128,6 +128,21 @@ tasks.register('quality') {
 
 version = providers.gradleProperty('releaseVersion').orElse(providers.gradleProperty('version')).get()
 
+def sourceRevision = providers.exec {
+	commandLine 'git', 'describe', '--always', '--dirty'
+	ignoreExitValue = true
+}.standardOutput.asText.map { value -> value.trim() ?: 'unknown' }
+
+tasks.named('jar') {
+	manifest {
+		attributes(
+		'Implementation-Title': 'Event Framework',
+		'Implementation-Version': project.version,
+		'Build-Revision': sourceRevision.get()
+		)
+	}
+}
+
 publishing {
 	repositories {
 		maven {
